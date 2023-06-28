@@ -1,0 +1,345 @@
+using MFiles.VAF.Common;
+using MFiles.VaultApplications.Logging;
+using MFilesAPI;
+using System;
+using System.IO;
+using PdfSharp.Pdf;
+using PdfSharp.Pdf.IO;
+using Spire.Doc;
+
+namespace DocumentMerge
+{
+    public class DocumentMerge
+    {
+        public ILogger Logger { get; private set; }
+        public void DocumentMergeAction(EventHandlerEnvironment env, Configuration.DocumentMergeSetup configuration, Vault vault)
+        {
+            try
+            {
+                // Check if the class ID matches
+                if (configuration.Class.ID != env.ObjVerEx.Class)
+                {
+                    return;
+                }
+
+                // Check if the action state ID matches and it's not entering the state
+                if (configuration.ActionState.ID != env.ObjVerEx.State)
+                {
+                    return;
+                }
+
+                string outputPath = configuration.Path;
+
+                this.Logger.Trace("Download and merge the main object file.");
+
+                // Download and merge the main object file
+                var latestObjVersion = vault.ObjectOperations.GetLatestObjVer(env.ObjVerEx.ObjID, true, false);
+                var mainObjFiles = vault.ObjectFileOperations.GetFiles(latestObjVersion);
+
+                // Error Handling if Object has no files
+                if (mainObjFiles.Count > 0)
+                {
+                    foreach (ObjectFile mainObjFile in mainObjFiles)
+                    {
+                        //vault.ObjectFileOperations.DownloadFile(mainObjFile.ID, mainObjFile.Version, Path.Combine(outputPath, mainObjFile.ID.ToString()));
+                        //this.Logger.Trace("Downloaded file: " + mainObjFile.Title + "ID: " + mainObjFile.ID);
+                        string downloadedFilePath = Path.Combine(outputPath, mainObjFile.ID.ToString());
+                        vault.ObjectFileOperations.DownloadFile(mainObjFile.ID, mainObjFile.Version, downloadedFilePath);
+                        this.Logger.Trace("Downloaded file: " + mainObjFile.Title + " ID: " + mainObjFile.ID);
+                        if (Path.GetExtension(mainObjFile.Title).ToLower() == ".doc" || Path.GetExtension(mainObjFile.Title).ToLower() == ".docx")
+                        {
+                            this.Logger.Trace("Converting Word document to PDF: " + mainObjFile.Title + " ID: " + mainObjFile.ID);
+                            string pdfPath = ConvertWordToPdf(downloadedFilePath, downloadedFilePath);
+                            // Replace the Word document with the converted PDF
+                            File.Delete(downloadedFilePath);
+                            downloadedFilePath = pdfPath;
+                        }
+                    }
+                }
+
+                // Perform the merging logic with the downloaded files
+                MergePDFs(env, configuration, vault, outputPath);
+                this.Logger.Trace("Merging logic executed.");
+
+                // Update the main object with the merged file
+                var mergedFilePath = Path.Combine(outputPath, env.ObjVerEx.ID.ToString());
+                var modFiles = vault.ObjectFileOperations.GetFilesForModificationInEventHandler(env.ObjVer);
+                env.Vault.ObjectOperations.SetSingleFileObject(env.ObjVer, false);
+
+                if (mainObjFiles.Count > 0)
+                {
+                    env.Vault.ObjectFileOperations.RemoveFile(env.ObjVer, modFiles[1].FileVer);
+                    this.Logger.Trace("Removed existing file from main object.");
+                }
+
+                env.Vault.ObjectFileOperations.AddFile(env.ObjVer, env.ObjVerEx.ID.ToString(), "pdf", mergedFilePath);
+                this.Logger.Trace("Added merged file to main object.");
+
+                env.Vault.ObjectFileOperations.UpdateMetadataInFile(env.ObjVer, -1, false);
+                env.Vault.ObjectOperations.SetSingleFileObject(env.ObjVer, true);
+
+                // Clean Merged PDF File
+                File.Delete(Path.Combine(mergedFilePath));
+                this.Logger.Trace("Deleted merged PDF file.");
+
+                // Clean up the main object files
+                foreach (ObjectFile mainObjFile in mainObjFiles)
+                {
+                    File.Delete(Path.Combine(outputPath, mainObjFile.ID.ToString()));
+                    this.Logger.Trace("Deleted downloaded file: " + mainObjFile.Title + "ID: " + mainObjFile.ID);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Logger.Error("Document Merge failed: " + ex);
+            }
+        }
+
+        public void MergeAndCreateNewObject(EventHandlerEnvironment env, Configuration.DocumentMergeSetup configuration, Vault vault)
+        {
+            try
+            {
+                // Check if the class ID matches
+                if (configuration.Class.ID != env.ObjVerEx.Class)
+                {
+                    this.Logger.Trace("Class ID does not match. Aborting MergeAndCreateNewObject.");
+                    return;
+                }
+
+                // Check if the action state ID matches and it's not entering the state
+                if (configuration.ActionState.ID != env.ObjVerEx.State)
+                {
+                    this.Logger.Trace("Action state ID does not match or entering the state. Aborting MergeAndCreateNewObject.");
+                    return;
+                }
+
+                string outputPath = configuration.Path;
+
+                // Download and merge the main object file
+                var latestObjVersion = vault.ObjectOperations.GetLatestObjVer(env.ObjVerEx.ObjID, true, false);
+                var mainObjFiles = vault.ObjectFileOperations.GetFiles(latestObjVersion);
+
+                // Error Handling if Object has no files
+                if (mainObjFiles.Count > 0)
+                {
+                    foreach (ObjectFile mainObjFile in mainObjFiles)
+                    {
+                        //this.Logger.Trace("Downloading main object file: " + mainObjFile.Title + "ID: " + mainObjFile.ID);
+                        //vault.ObjectFileOperations.DownloadFile(mainObjFile.ID, mainObjFile.Version, Path.Combine(outputPath, mainObjFile.ID.ToString()));
+                        string downloadedFilePath = Path.Combine(outputPath, mainObjFile.ID.ToString());
+                        vault.ObjectFileOperations.DownloadFile(mainObjFile.ID, mainObjFile.Version, downloadedFilePath);
+                        this.Logger.Trace("Downloaded file: " + mainObjFile.Title + " ID: " + mainObjFile.ID);
+                        // Check if the file is a Word document
+                        if (Path.GetExtension(mainObjFile.Title).ToLower() == ".doc" || Path.GetExtension(mainObjFile.Title).ToLower() == ".docx")
+                        {
+                            this.Logger.Trace("Converting Word document to PDF: " + mainObjFile.Title + " ID: " + mainObjFile.ID);
+                            string pdfPath = ConvertWordToPdf(downloadedFilePath, downloadedFilePath);
+                            // Replace the Word document with the converted PDF
+                            File.Delete(downloadedFilePath);
+                            downloadedFilePath = pdfPath;
+                        }
+                    }
+                }
+
+                // Perform the merging logic with the downloaded files
+                this.Logger.Trace("Performing merging logic.");
+                MergePDFs(env, configuration, vault, outputPath);
+
+                string mergedFilePath = Path.Combine(outputPath, env.ObjVerEx.ID.ToString());
+                
+                // Create the new object using CreateNewObjectEx
+                var accessControlList = vault.ObjectOperations.GetObjectPermissions(env.ObjVer).AccessControlList;
+                var isSingleFileDocument = (mainObjFiles.Count == 1 && env.ObjVerEx.Type == (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument);
+
+                var propertyValues = new PropertyValues();
+
+                // Set the action class property
+                PropertyValue actionClassProperty = new PropertyValue();
+                actionClassProperty.PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefClass;
+                actionClassProperty.TypedValue.SetValue(MFDataType.MFDatatypeLookup, configuration.MergeClass.ID);
+                propertyValues.Add(-1, actionClassProperty);
+
+                // Set the document relationship property
+                var documentRelationshipProperty = env.Vault.ObjectTypeOperations.GetObjectType((int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument).DefaultPropertyDef;
+
+                var docRelationship = new PropertyValue();
+                docRelationship.PropertyDef = documentRelationshipProperty;
+                docRelationship.Value.SetValue(MFDataType.MFDatatypeMultiSelectLookup, env.ObjVerEx.ID);
+                propertyValues.Add(-1, docRelationship);
+
+                // Create the new object using CreateNewObjectExQuick
+                this.Logger.Trace("Creating new object.");
+                var newObject = env.Vault.ObjectOperations.CreateNewObjectEx(
+                    (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                    propertyValues,
+                    null,
+                    AccessControlList: accessControlList,
+                    CheckIn: true);
+
+                ObjVerEx newObjVerEx = SearchObjectByID(vault, Convert.ToInt32(newObject.ObjVer.ID));
+
+                var checkout = newObjVerEx.StartRequireCheckedOut();
+
+                // Set the merge object property
+                this.Logger.Trace("Setting merge object property.");
+                env.ObjVerEx.SetProperty(configuration.MergeObjectProperty, MFDataType.MFDatatypeMultiSelectLookup, newObjVerEx.ObjVer.ID);
+
+                var modFiles = vault.ObjectFileOperations.GetFilesForModificationInEventHandler(newObjVerEx.ObjVer);
+
+                env.Vault.ObjectOperations.SetSingleFileObject(newObjVerEx.ObjVer, false);
+
+                // Add the merged file to the new object
+                this.Logger.Trace("Adding merged file to the new object.");
+                env.Vault.ObjectFileOperations.AddFile(newObjVerEx.ObjVer, newObjVerEx.ID.ToString(), "pdf", mergedFilePath);
+                env.Vault.ObjectFileOperations.UpdateMetadataInFile(newObjVerEx.ObjVer, -1, false);
+                env.Vault.ObjectOperations.SetSingleFileObject(newObjVerEx.ObjVer, true);
+                env.ObjVerEx.SaveProperties();
+
+                newObjVerEx.EndRequireCheckedOut(checkout);
+
+                // Clean up the merged PDF file
+                this.Logger.Trace("Cleaning up the merged PDF file.");
+                File.Delete(mergedFilePath);
+
+                // Clean up the main object files
+                foreach (ObjectFile mainObjFile in mainObjFiles)
+                {
+                    this.Logger.Trace("Cleaning up main object file: " + mainObjFile.Title + "ID: " + mainObjFile.ID);
+                    File.Delete(Path.Combine(outputPath, mainObjFile.ID.ToString()));
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Logger.Error("Document Merge failed: " + ex);
+            }
+        }
+        private void MergePDFs(EventHandlerEnvironment env, Configuration.DocumentMergeSetup configuration, Vault vault, string outputPath)
+        {
+            try
+            {
+                // Prepare the merged file path
+                string mergedFilePath = Path.Combine(outputPath, env.ObjVerEx.ID.ToString());
+                bool mergedFileExists = File.Exists(mergedFilePath);
+
+                // Check if the merged file already exists
+                if (!mergedFileExists)
+                {
+                    // Create a new PdfDocument for merging
+                    using (var mergedDocument = new PdfDocument())
+                    {
+                        // Get the latest object version and its files
+                        var latestObjVersion = vault.ObjectOperations.GetLatestObjVer(env.ObjVerEx.ObjID, true, false);
+                        var mainObjFiles = vault.ObjectFileOperations.GetFiles(latestObjVersion);
+
+                        // Check if main object files exist
+                        if (mainObjFiles != null)
+                        {
+                            // Merge pages from main object files
+                            foreach (ObjectFile mainObjFile in mainObjFiles)
+                            {
+                                var mainObjFilePath = Path.Combine(outputPath, mainObjFile.ID.ToString());
+                                // Download the main object file
+                                vault.ObjectFileOperations.DownloadFile(mainObjFile.ID, mainObjFile.Version, mainObjFilePath);
+
+                                // Open the downloaded file as input document
+                                using (var fileStream = File.OpenRead(mainObjFilePath))
+                                {
+                                    var inputDocument = PdfReader.Open(fileStream, PdfDocumentOpenMode.Import);
+
+                                    // Add each page from the input document to the merged document
+                                    for (int i = 0; i < inputDocument.PageCount; i++)
+                                    {
+                                        var page = inputDocument.Pages[i];
+                                        mergedDocument.AddPage(page);
+                                    }
+                                }
+
+                                // Log the successful merging of a main object file
+                                this.Logger.Trace("Merged main object file: " + mainObjFile.Title + "ID: " + mainObjFile.ID);
+                            }
+                        }
+
+                        // Merge reference object files
+                        foreach (var refProperty in configuration.SubConfiguration2)
+                        {
+                            var propertyDefinitionId = refProperty.RefProperty.ID;
+
+                            // Get the lookup values from the property
+                            var propertyValues = env.ObjVerEx.GetLookupsFromProperty(propertyDefinitionId);
+
+                            // Process each reference object
+                            foreach (Lookup propValue in propertyValues)
+                            {
+                                ObjVerEx refObjVerEx = SearchObjectByID(vault, Convert.ToInt32(propValue.Item));
+                                var refObjVersion = vault.ObjectOperations.GetLatestObjVer(refObjVerEx.ObjID, true, false);
+
+                                var refObjFiles = vault.ObjectFileOperations.GetFiles(refObjVersion);
+
+                                // Check if reference object has files
+                                if (refObjFiles.Count < 1)
+                                {
+                                    // Skip if no files found
+                                    continue;
+                                }
+
+                                // Merge pages from reference object files
+                                foreach (ObjectFile refObjFile in refObjFiles)
+                                {
+                                    // Download the reference object file
+                                    vault.ObjectFileOperations.DownloadFile(refObjFile.ID, refObjFile.Version, Path.Combine(outputPath, refObjFile.ID.ToString()));
+
+                                    // Open the downloaded file as input document
+                                    using (var fileStream = File.OpenRead(Path.Combine(outputPath, refObjFile.ID.ToString())))
+                                    {
+                                        var inputDocument = PdfReader.Open(fileStream, PdfDocumentOpenMode.Import);
+
+                                        // Add each page from the input document to the merged document
+                                        for (int i = 0; i < inputDocument.PageCount; i++)
+                                        {
+                                            var page = inputDocument.Pages[i];
+                                            mergedDocument.AddPage(page);
+                                        }
+                                    }
+
+                                    // Clean up temporary reference files
+                                    File.Delete(Path.Combine(outputPath, refObjFile.ID.ToString()));
+
+                                    // Log the successful merging of a reference object file
+                                    this.Logger.Trace("Merged reference object file: " + refObjFile.Title + "ID: " + refObjFile.ID);
+                                }
+                            }
+                        }
+
+                        // Save the merged document to the final file path
+                        mergedDocument.Save(mergedFilePath);
+
+                        // Log the successful merging of the document
+                        this.Logger.Trace("Document merged successfully: " + mergedFilePath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log any errors that occurred during document merging
+                this.Logger.Error("Document Merge failed: " + ex);
+            }
+        }
+        private string ConvertWordToPdf(string inputPath, string outputPath)
+        {
+            Document document = new Document();
+            document.LoadFromFile(inputPath);
+            string outputPdfPath = Path.ChangeExtension(outputPath, ".pdf");
+            document.SaveToFile(outputPdfPath, FileFormat.PDF);
+            return outputPdfPath;
+        }
+        private ObjVerEx SearchObjectByID(Vault vault, int originalID)
+        {
+            var searchBuilder = new MFSearchBuilder(vault);
+
+            searchBuilder.Deleted(false);
+            searchBuilder.Object(originalID);
+
+            return searchBuilder.FindOneEx();
+        }
+    }
+}
