@@ -1,0 +1,45 @@
+Contracts:
+
+1. State: 1. Inicijalno stanje:
+	a. Description: U ovom koraku osoba kreira ugovor. Polja kao što su Naziv dokumenta, broj dokumenta, odjel te odobravatelj ugovora se popunjavaju automatski dok se ostala polja popunjavaju ručno. Nakon što se popuni ručno šalje se dalje na odobravanje putem state tranzicije Pošalji na odobrenje. Ukoliko se na kraju ispostavi da ugovor nije potreban putem state tranzicije Obriši ugovor se može obrisati uz obavezan komentar.odobravanja.
+2. State: 2. Odobravanje (Odjel)
+	a. Description: U ovom koraku ugovor dolazi na odobravanje osobi koja je zadužena za odobravanje ugovora za odjel koji je postavljen na meta data kartici. Osoba koja mora odobriti dokument trebala bi dobiti i notifikaciju na mail adresu. Odobravanje se vrši na principu odvojenog zadatka. Ukoliko osoba prihvaća narudžbenicu u odvojenom zadatku će označiti kvačicu pored svoga imena. Ukoliko osoba odbija narudžbenicu u odvojenom zadataku će odabrati iks pored svoga imena u zadatku te uz obavezan komentar odbiti zadatak. Nakon odobravanja sa strane osobe zadužene za odobravanje ugovor taj dokument može ili otići dalje na odobravanje ili može otići u korak odobreno.
+		a. Situacije za daljnje odobravanje ugovora od strane direktora:
+			i. Iznad 530 eura te odjeli IT, Kontroling,Ured uprave, Marketing, Overhead – ide na odobravanje kod direktora društva
+			ii. iznad 39800 eura te odjel Operational support –  odobrava i direktor
+			iii.  iznad 26600 eura te odjel Sales – odobrava i direktor
+3. State: 2.1 Odobreno:
+	a. Description: U ovom koraku se ugovor vraća osobi koja je kreirala isti. Osoba na koju se dokument dodijelio može obrisati navdeni dokument ukoliko se na kraju ispostavi da je nepotrebna putem state tranzicije Obriši naravno uz obavezan komentar zbog čega se briše dokument. Ukoliko je sve s dokumentom uredu putem state tranzicije Aktiviraj se dokument prebacuje u Aktivne Ugovore.
+4. State: 2.2 Odbijeno:
+	a. Description:  koraku Odbijeno se dokument nalazi ukoliko ga odbiju ili osoba zadužena za odobravanje dokumenata ili direktor društva. U koraku odbijeno se dokument dodjeljuje osobi koja je kreirala dokument. Osoba na koju je dodjeljeno može navedeni dokument poslati na reviziju uz obavezan komentar ili poslati u arhivu odbijenih dokumenata također uz obavezan komentar.
+5. State: 2.3 Revizija:
+	a. Description: U koraku revizije se dokument se dodjeljuje osobi koja je kreirala dokument te se pregledom komentara utvrđuje što se mora izmjeniti. Kada su napravljene određene izmjene putem state tranzicije Pošalji na odobravanje dokument se šalje na odobravanje
+6. State: 3. Odobravanje (Uprava):
+	a. Description: U ovom koraku dokument dolazi na odobravanje direktoru društva. Osoba će dobiti mail notifikaciju da je potrebno odobriti dokument. Odobravanje se izvršava kao i u ostalim koracima odobravanja odnosno putem zasebnog zadatka. Ukoliko osoba odbija zadatak pored svoga imena u zasebnom zadatku označuje iks te uz obavezan komentar odbija dokument. Ukoliko osoba prihvaća dokument potrebno je pored svoga imena stisnutu kvačicu i dokument je odobren.
+7. State: 4. Obrisano:
+	a. Description: U ovom koraku se svi dokumenti brišu. U ovaj korak se može poslati iz koraka 1.1 Inicijalno stanje, 2.1 Odobreno i 2.2 Odbijeno uz obavezan komentar i state tranzicijom Obriši.
+8. State: 2.1.1 Arhiva - Odobreno:
+	a. Description: U ovom koraku se nalaze svi dokumenti koji su odobreni. U ovom koraku nema uređivanja dokumenata nego svi mogu samo čitati.
+9. State: 2.2.1 Arhiva - Odbijeno:
+	a. Description: U ovom koraku se nalaze svi dokumenti koji su odbijeni. U ovom koraku nema uređivanja dokumenata nego svi mogu samo čitati ili obrisati. Obrisati može samo osoba koja je kreirala dokument uz obavezan komentar.
+10. State: 2.1.1 Aktivni ugovori:
+	a. Description: u ovom koraku su svi aktivni ugovori. Ostaju u ovom koraku sve do trenutka isteka. U ovom koraku nema izmjena stavaka na ugovoru.
+
+
+Prava unutar ovoga procesa:
+Ugovor – Kreiranje odobravanje
+Direktor društva – Read Only
+Assigned to – read, edit, change permission
+Created by – read only
+ 
+Ugovor – Arhiva
+Direktor Društva – read only
+Created by – read only
+Odobravatelj ugovor.M-Files
+ 
+Ugovor – Aktivni
+Direktor društva – read only
+Created by- read only
+Odjel.Djhelatnik.M-Files User – read only
+
+
