@@ -1,0 +1,81 @@
+State: 1. Inicijalno stanje: U ovom koraku osoba kreira putni nalog za putovanje. Nekoliko je scenarija vezano za kreiranje putnog naloga. Scenariji su sljedeći:
+Osobno vozilo : - potrebno je popunjavanje Datum dokumenta,Grad, Registracijska oznaka, Datum i vrijeme polaska te Početna kilometraža ( ukoliko se ne popune propertiji neće biti moguće kreirati putni nalog).
+Službeno vozilo: - Datum dokumenta, Grad te Datum i vrijeme i polaska ( ukoliko se ne popune propertiji neće biti moguće biti kreirati putni nalog) – isti je scenarij vezan za autobus ili zrakoplov
+
+OSTALI PROPERTIJI OSTAJU NEPOPUNJENI!
+
+           Iz ovog koraka možemo slati na odobravanje putnog naloga putem state tranzicije Pošalji na odobravanje ili obrisati putni nalog uz obavezan komentar putem state tranzicije obriši.
+
+State: 2. Odobravanje (Odjel) : U ovom koraku putni nalog odobrava osoba koja je zadužena za odobravanje putnih naloga unutar vašega odjela. Osoba koja je zadužena za odobravanje naloga to radi putem odvojenog zadatka. Ukoliko se slaže s putovanjem označiti će kvačicom da odobrava put te ukoliko se ne slaže s istim pritisnuti će iksić pored svojega imena te uz obavezan komentar odbiti putni nalog.
+
+ 
+
+State: 2.1 Dopuna putnog naloga – ukoliko je put odobren te je naravno i završio potrebno je odraditi i dopunu putnoga naloga. Potrebno je popuniti sva preostala meta polja te poslati nalog dalje na odobravanje voditelju svojega odjela. Nalog se šalje putem state tranzicije Pošaljie na odobravanje uz obavezan komentar. Osoba koja je zadužena za odobravanje naloga to radi putem odvojenog zadatka. Ukoliko se slaže s putovanjem označiti će kvačicom da odobrava put te ukoliko se ne slaže s istim pritisnuti će iksić pored svojega imena te uz obavezan komentar odbiti putni nalog.
+
+ 
+
+State: 3. Likvidiranje : Ukoliko je putni nalog odobren isti dolazi na pregled i odobravanje u korak Likvidiranje.  Osoba koja je zadužena za odobravanje naloga to radi putem odvojenog zadatka. Ukoliko se slaže s putovanjem označiti će kvačicom da odobrava put te ukoliko se ne slaže s istim pritisnuti će iksić pored svojega imena te uz obavezan komentar odbiti putni nalog. Ovdje se zadatak dodjeljuje na dvije osobe. Dovoljno je da jedna osoba odbije ili prihvati da putni nalog bude odobren ili odbijen.
+
+ 
+
+ 
+
+State: 2.3 Revizija: U koraku revizije se dokument se dodjeljuje osobi koja je kreirala dokument te se pregledom komentara utvrđuje što se mora izmjeniti. Kada su napravljene određene izmjene putem state tranzicije Pošalji na odobravanje dokument se šalje na odobravanje.
+
+State: 3. Odobravanje (Uprava): U ovom koraku dokument dolazi na odobravanje direktoru društva. Osoba će dobiti mail notifikaciju da je potrebno odobriti dokument. Odobravanje se izvršava kao i u ostalim koracima odobravanja odnosno putem zasebnog zadatka. Ukoliko osoba odbija zadatak pored svoga imena u zasebnom zadatku označuje iks te uz obavezan komentar odbija dokument. Ukoliko osoba prihvaća dokument potrebno je pored svoga imena stisnutu kvačicu i dokument je odobren.
+
+Direktor društva će odobravati i pregledavati putne naloge u ovom koraku samo ako osoba nije unutar Managment Departmenta. Ukoliko je putni nalog će biti pregledan od strane direktora društva već u koraku: 2. te 2. Odobravanje Odjel Dopuna.
+
+ 
+
+State: Obrisano: U ovom koraku se svi dokumenti brišu. U ovaj korak se može poslati iz koraka 1.1 Inicijalno stanje te iz koraka 5.1. Arhiva – Odbijeno naravno uz obavezan komentar.
+
+ 
+
+State Odbijeno: U ovom koraku se nalaze svi odbijeni putni nalozi od strane voditelja odjela, likvidatora ili direktora društva. U ovom koraku se putni nalog dodjeljuje osobi koja ga je kreirala te u komentaru može vidjeti razlog odbijanja putnog naloga. Ukoliko osoba koja je kreirala putni nalog želi revidirati isti putem state tranzicije Revidiraj prebacuje ga u Reviziju. Ukoliko ga ne želi revidirati nego arhivirati putem state tranzicije arhiviraj prebacuje putni nalog u arhivu uz obavezan komentar.
+
+ 
+
+State 6. Arhiva – Odobreno: U ovom koraku se nalaze svi putni nalozi koji su prošli kroz cijeli proces odobravanja te su odobreni od strane voditelja i/ili direktora društva. Unutar ovoga koraka nema mogućnosti da se putni nalog uređuje.
+
+ 
+
+ 
+
+State 5.1 Arhiva – Obijeno: U ovom koraku se nalaze svi putni nalozi koji su odbijeni od strane i/ili voditelja odjela, direktora društva ili likvidatora. U ovom koraku osoba ne može uređivati putni nalog. Može ga ili ostaviti u arhivi odbijenih putnih naloga ili ga putem state tranzicije obriši obrisati uz obavezan komentar zbog čega se navedeni putni nalog briše.
+
+ 
+
+State 5. Odobreno: Kroz ovaj korak objekt samo prolazi te kreratoru putnog naloga dolazi obavijest da je putni nalog odobren te poslan u arhivu.
+
+                                                                                      
+
+Prava unutar ovoga procesa:
+
+Putni nalog – Kreiranje odobravanje
+
+Direktor društva – Read Only
+
+Assigned to – read, edit, change permission
+
+Created by – read only
+
+ 
+
+Putni nalog – Arhiva
+
+Direktor Društva – read only
+
+Created by – read only
+
+Odobravatelj ugovor.M-Files
+
+ 
+
+Putni nalog – Aktivni
+
+Direktor društva – read only
+
+Created by- read only
+
+Odjel.Djhelatnik.M-Files User – read only
