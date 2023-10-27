@@ -1,0 +1,1987 @@
+using System;
+using System.Diagnostics;
+using MFiles.VAF;
+using MFiles.VAF.Common;
+using MFiles.VAF.Configuration;
+using MFiles.VAF.Core;
+using MFilesAPI;
+using System.Xml.Serialization;
+using System.Xml;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using Newtonsoft.Json;
+using System.Net;
+using System.Text;
+using System.Threading.Tasks;
+using System.Net.Http;
+using System.Globalization;
+using System.Net.Http.Headers;
+using RestSharp;
+using RestSharp.Authenticators;
+using System.Xml.Linq;
+using MFiles.VAF.Extensions;
+using MFiles.VAF.AppTasks;
+
+namespace GetSolumaFiles
+{
+    /// <summary>
+    /// The entry point for this Vault Application Framework application.
+    /// </summary>
+    /// <remarks>Examples and further information available on the developer portal: http://developer.m-files.com/. </remarks>
+    public class VaultApplication
+        : MFiles.VAF.Extensions.ConfigurableVaultApplicationBase<Configuration>
+    {
+        public static string logEnvirovment = "PROD"; // "TEST" "PROD"
+        public string LuceedURL = "http://:"; //TEST: "http://:" PROD: 
+
+        // Sequential processing; all tasks will be executed one-by-one, in the order they were added to the queue.
+        [TaskQueue(Behavior = MFTaskQueueProcessingBehavior.MFProcessingBehaviorSequential)]
+        public const string QueueId = "sampleApplication.VaultApplication";
+        public const string UploadToRemoteSystemTaskType = "UploadToRemoteSystem";
+
+        [StateAction("WorkflowStateAliasForStateABCD")]
+        public void HandleStateABCD(StateEnvironment env)
+        {
+            // When the object hits this state, add a task for it.
+            this.TaskManager.AddTask
+            (
+                env.Vault,
+                QueueId,
+                UploadToRemoteSystemTaskType,
+                // Directives allow you to pass serializable data to and from the task.
+                directive: new ObjIDTaskDirective(env.ObjVer.ObjID)
+            );
+        }
+
+        [TaskProcessor(QueueId, UploadToRemoteSystemTaskType)]
+        public void UploadToRemoteSystem(ITaskProcessingJob<ObjIDTaskDirective> job)
+        {
+            // Get the object ID.
+            if (false == job.Directive.TryGetObjID(out ObjID objID))
+                return;
+
+            // TODO: Send the item to the external system.
+
+            // TODO: Update the object, moving it to the next workflow state.
+            // Note: failing to call job.Commit will cause an exception.
+            job.Commit((transactionalVault) =>
+            {
+                // ...do any work using the transactional vault reference.
+            });
+        }
+
+
+        [VaultExtensionMethod("MoveToURASoluma", RequiredVaultAccess = MFVaultAccess.MFVaultAccessNone)]
+
+        private string MoveToURASoluma(EventHandlerEnvironment env)
+        {
+            try
+            {
+                var id = Int32.Parse(env.Input);
+                // We want to alter the document with ID = id.
+                var objID = new MFilesAPI.ObjID();
+                objID.SetIDs(
+                    ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                    ID: id);
+
+                DeleteHistory(id, env.Vault);
+
+                // Check out the object.
+                var checkedOutObjectVersion = env.Vault.ObjectOperations.CheckOut(objID);
+
+
+                // Create a property value for the (new) workflow state.
+                var workflowStateProperty = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                };
+                workflowStateProperty.Value.SetValue(
+                    MFDataType.MFDatatypeLookup,
+                    env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias("WFS_GetSolumaFiles")); // The ID of a workflow state that is valid to move to from the current one.
+
+                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: checkedOutObjectVersion.ObjVer,
+                    PropertyValue: workflowStateProperty);              
+
+                // Check the object back in.
+                env.Vault.ObjectOperations.CheckIn(checkedOutObjectVersion.ObjVer);
+
+                DeleteFirstVersion(id, env.Vault);
+
+                return "1";
+
+
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma", ex);
+                return "0";
+            }
+
+        }
+
+
+        [VaultExtensionMethod("DokumentNijeObradjen", RequiredVaultAccess = MFVaultAccess.MFVaultAccessNone)]
+        private string DokumentNijeObradjen(EventHandlerEnvironment env)
+        {
+            try
+            {
+                var id = Int32.Parse(env.Input);
+                // We want to alter the document with ID = id.
+                var objID = new MFilesAPI.ObjID();
+                objID.SetIDs(
+                    ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                    ID: id);
+                // Check out the object.
+                var checkedOutObjectVersion = env.Vault.ObjectOperations.CheckOut(objID);
+                // Create a property value for the (new) workflow state.
+                var workflowStateProperty = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                };
+                workflowStateProperty.Value.SetValue(
+                    MFDataType.MFDatatypeLookup,
+                    env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias(this.Configuration.dokumentNijeObradjen_WFS.Alias)); // The ID of a workflow state that is valid to move to from the current one.
+                                                                                                                                          // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: checkedOutObjectVersion.ObjVer,
+                    PropertyValue: workflowStateProperty);
+
+                env.Vault.ObjectOperations.CheckIn(checkedOutObjectVersion.ObjVer);
+
+                return "1";
+
+
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma", ex);
+                return "0";
+            }
+
+        }
+
+        [VaultExtensionMethod("MoveToNURASoluma", RequiredVaultAccess = MFVaultAccess.MFVaultAccessNone)]
+        private string MoveToNURASoluma(EventHandlerEnvironment env)
+        {
+            try
+            {
+                var id = Int32.Parse(env.Input);
+                var objID = new MFilesAPI.ObjID();
+                objID.SetIDs(
+                    ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                    ID: id);
+
+                DeleteHistory(id, env.Vault);
+
+                // Check out the object.
+                var checkedOutObjectVersion = env.Vault.ObjectOperations.CheckOut(objID);
+
+
+                // Create a property value for the (new) workflow state.
+                var workflowStateProperty = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                };
+                workflowStateProperty.Value.SetValue(
+                    MFDataType.MFDatatypeLookup,
+                    env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias("WFS_GetSolumaFilesNotURA")); // The ID of a workflow state that is valid to move to from the current one.
+
+                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: checkedOutObjectVersion.ObjVer,
+                    PropertyValue: workflowStateProperty);
+
+                // Check the object back in.
+                env.Vault.ObjectOperations.CheckIn(checkedOutObjectVersion.ObjVer);
+
+                DeleteFirstVersion(id, env.Vault);
+
+                return "1";
+
+
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma", ex);
+                return "0";
+            }
+
+        }
+        protected override void StartApplication()
+        {
+            // Start writing content to the event log every ten seconds.
+            // The background operation will continue until the vault goes offline.
+            this.BackgroundOperations.StartRecurringBackgroundOperation("Recurring Get Files From Soluma URA",
+                TimeSpan.FromMinutes(3), () =>
+                {
+                    string path = this.Configuration.PutanjaNaDisc;
+                    string result;
+                    string idString;
+                    try
+                    {
+                        // Only get files that ends with .ura...
+                        string[] dirs = Directory.GetFiles(path, "*.ura");
+
+                        foreach (string dir in dirs)
+                        {
+                            //Console.WriteLine(dir);
+
+                            result = Path.GetFileName(dir);
+                            //Console.WriteLine(result);
+
+                            // makni .ura ekstenziju    // remove extension from file name...
+                            idString = result.Remove(result.Length - 4, 4);
+                            //Console.WriteLine(idString);
+
+                            int id = Convert.ToInt32(idString);
+
+
+                            if (File.Exists(this.Configuration.PutanjaNaDisc + idString + ".pdf") && File.Exists(this.Configuration.PutanjaNaDisc + idString + ".xml"))
+                            {
+                                //MoveToURASoluma()
+
+                                this.PermanentVault.ExtensionMethodOperations.ExecuteVaultExtensionMethod("MoveToURASoluma", idString);
+                            {
+
+                            else
+                            {
+                                var objID = new MFilesAPI.ObjID();
+                                objID.SetIDs(
+                                    ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                                    ID: id);
+
+
+                                //string nocStr = checkedOutObjectVersion.BaseProperties.GetProperty(this.Configuration.noc_PD.ID).TypedValue.DisplayValue;
+                                string nocStr = File.ReadAllText(this.Configuration.PutanjaNaDisc + idString + ".ura");
+
+
+                                int noc = int.Parse(nocStr);
+                                if (noc > 5)
+                                {
+                                   this.PermanentVault.ExtensionMethodOperations.ExecuteVaultExtensionMethod("DokumentNijeObradjen", idString);
+                                   
+                                }
+                                else
+                                {
+                                    noc = noc + 1;
+                                    File.WriteAllText(this.Configuration.PutanjaNaDisc + idString + ".ura", String.Empty);
+                                    File.WriteAllText(this.Configuration.PutanjaNaDisc + idString + ".ura", noc.ToString());
+                                }
+
+
+                            }
+                        }
+
+                        string path2 = this.Configuration.PutanjaNaDiscNeURA;
+                        string result2;
+                        string idString2;
+
+                            // Only get files that begin with the letter "c".
+                            string[] dirs2 = Directory.GetFiles(path2, "*.nura");
+
+                            foreach (string dir in dirs2)
+                            {
+
+                                result2 = Path.GetFileName(dir);
+
+                                // makni .nura ekstenziju 
+                                idString2 = result2.Remove(result2.Length - 5, 5);
+
+                                int id = Convert.ToInt32(idString2);
+
+
+                                if (File.Exists(this.Configuration.PutanjaNaDiscNeURA + idString2 + ".pdf"))
+                                {
+                                this.PermanentVault.ExtensionMethodOperations.ExecuteVaultExtensionMethod("MoveToNURASoluma", idString2);
+                              
+                            }
+                                else
+                                {
+                                    var objID = new MFilesAPI.ObjID();
+                                    objID.SetIDs(
+                                        ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                                        ID: id);
+
+
+                                    //string nocStr = checkedOutObjectVersion.BaseProperties.GetProperty(this.Configuration.noc_PD.ID).TypedValue.DisplayValue;
+                                    string nocStr = File.ReadAllText(this.Configuration.PutanjaNaDiscNeURA + idString2 + ".nura");
+
+
+                                    int noc = int.Parse(nocStr);
+                                    if (noc > 5)
+                                    {
+                                    this.PermanentVault.ExtensionMethodOperations.ExecuteVaultExtensionMethod("DokumentNijeObradjen", idString2);
+                                   
+                                    }
+                                    else
+                                    {
+                                        noc = noc + 1;
+                                        File.WriteAllText(this.Configuration.PutanjaNaDiscNeURA + idString2 + ".nura", String.Empty);
+                                        File.WriteAllText(this.Configuration.PutanjaNaDiscNeURA + idString2 + ".nura", noc.ToString());
+                                    }
+                                }
+                            
+                            }
+                        }
+                    catch (Exception e)
+                    {
+                        //Console.WriteLine("The process failed: {0}", e.ToString());
+                        SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma", e);
+                    }
+                });                
+        }
+
+
+        // luceed dio
+
+
+        public static Root GetPartnerInfo(string port, string _oib)
+        {
+            try
+            {
+                SysUtils.ReportInfoToEventLog(logEnvirovment + " dohvaćam partnera", "Dohvaćam partnera s porta: " + port + " s oib-om: " + _oib);
+
+               var client = new HttpClient();
+               string url = " :" + port + "/datasnap/rest/partneri/oib/" + _oib;
+               var byteArray = Encoding.ASCII.GetBytes(" ");
+                //var byteArray = Encoding.ASCII.GetBytes(" ");
+                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(byteArray));
+
+                var task = Task.Run(() => client.GetStringAsync(url));
+                task.Wait();
+                var response = task.Result;
+
+                Root root = JsonConvert.DeserializeObject<Root>(response);
+
+                return root;
+            }
+           
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles ->GetPartnerInfo  Oib" + _oib + " PORT" + port, ex);
+                return null;
+            }
+          
+        }
+        public static Result GetResult(Root root)
+        {
+            Result result = root.result[0];
+            return result;
+
+        }
+        public static string SendUraToLuceed(string port, string jsonb)
+        {
+             try
+              {
+                SysUtils.ReportInfoToEventLog(logEnvirovment + " slanje metadata URA", "Pokušaj slanja na port : " + port + " Json: " + jsonb);
+
+                
+                string url = " :" + port + "/datasnap/rest/ura/snimi";
+                var client = new RestClient(url);
+                client.Authenticator = new HttpBasicAuthenticator( );
+
+                var request = new RestRequest(Method.POST);
+                request.RequestFormat = DataFormat.Json;
+                request.AddHeader("cache-control", "no-cache");
+              //  request.AddHeader("Authorization", " ");
+                
+                request.AddParameter("application/json", jsonb, ParameterType.RequestBody);
+                var response = client.Execute(request);
+
+
+                return response.Content.ToString();
+
+               
+            }
+
+                catch (Exception ex)
+                {
+                    SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles ->SendUraToLuceed  PORT" + port, ex);
+                    return null;
+                }
+        
+        }
+
+
+        [StateAction("WFS_uraDokumentNijeObradenOcr")]
+
+        public void RejectedSoluma(StateEnvironment env)
+        {
+            var errorValue = new MFilesAPI.PropertyValue
+            {
+                PropertyDef = this.Configuration.error_PD.ID
+            };
+            errorValue.Value.SetValue(
+                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                "Pdf i / ili xml dokument iz Solume nisu pristigli!"
+            );
+
+            // Update the property on the server.
+            env.Vault.ObjectPropertyOperations.SetProperty(
+                ObjVer: env.ObjVer,
+                PropertyValue: errorValue);
+
+
+            try
+            {
+                File.Delete(this.Configuration.PutanjaNaDisc + env.ObjVer.ID.ToString() + ".ura");
+            }
+            // maybe it's nura, so it's not really an error
+            catch 
+            {  }
+
+            // maybe it's ura...
+            try
+            {
+                File.Delete(this.Configuration.PutanjaNaDiscNeURA + env.ObjVer.ID.ToString() + ".nura");
+            }
+            catch 
+            {  }
+
+        }
+
+
+        [StateAction("WFS_GetSolumaFiles")]
+
+        public void GetSolumaFiles(StateEnvironment env)
+        {
+            string errorProp = "";
+            if (env.ObjVerEx.HasProperty(this.Configuration.error_PD.ID))
+            {
+                errorProp = env.ObjVerEx.GetProperty(this.Configuration.error_PD.ID).Value.DisplayValue;
+            }
+                // string fileName = @"C:\Users\I-Loncar-adm\Desktop\Projekti_IvanL\Soluma export\" + env.ObjVer.ID.ToString() +".xml";
+                string fileName =  this.Configuration.PutanjaNaDisc + env.ObjVer.ID.ToString() + ".xml";
+
+                XmlDocument doc = new XmlDocument();
+
+                doc.Load(fileName);
+
+
+                // Get all relevant values from XML into variables....
+                // I will use them later to bind data to m-files
+                // Ivan@KonicaMinolta 
+
+                XmlNodeList nazivList = doc.GetElementsByTagName("Vendor_name");
+                string naziv = nazivList[0]?.InnerXml;
+
+                XmlNodeList OIBList = doc.GetElementsByTagName("Vendor_OIB_VAT");
+                string OIB = OIBList[0]?.InnerXml;
+
+                XmlNodeList OIBCLList = doc.GetElementsByTagName("Buyer_OIB_VAT");
+                string OIBKlijent = OIBCLList[0]?.InnerXml;
+
+                XmlNodeList BrojRacunaList = doc.GetElementsByTagName("DCA_InvoiceNumber");
+                string brojRacuna = BrojRacunaList[0]?.InnerXml;
+
+                XmlNodeList PozivNaBrojList = doc.GetElementsByTagName("DCA_PozivNaBroj");
+                string PozivNaBroj = PozivNaBrojList[0]?.InnerXml;
+
+
+            XmlNodeList datumRacunaList = doc.GetElementsByTagName("DCA_InvoiceDate");
+                string datumRacuna = datumRacunaList[0]?.InnerXml;
+
+                XmlNodeList valutaPlacanjaList = doc.GetElementsByTagName("DCA_DueDate");
+                string valutaPlacanja = valutaPlacanjaList[0]?.InnerXml;
+
+                XmlNodeList netoList = doc.GetElementsByTagName("PD_TotalNeto");
+                string neto = netoList[0]?.InnerXml;
+
+                XmlNodeList pdv25List = doc.GetElementsByTagName("PD_amount_VAT_25");
+                string pdv25 = pdv25List[0]?.InnerXml;
+
+                XmlNodeList pdv13List = doc.GetElementsByTagName("PD_amount_VAT_13");
+                string pdv13 = pdv13List[0]?.InnerXml;
+
+                XmlNodeList pdv5List = doc.GetElementsByTagName("PD_amount_VAT_5");
+                string pdv5 = pdv5List[0]?.InnerXml;
+
+                XmlNodeList pdvTotalList = doc.GetElementsByTagName("PD_TotalTax");
+                string pdvTotal = pdvTotalList[0]?.InnerXml;
+
+                XmlNodeList brutoList = doc.GetElementsByTagName("PD_TotalBruto");
+                string bruto = brutoList[0]?.InnerXml;
+
+                XmlNodeList valutaList = doc.GetElementsByTagName("Currency");
+                string valuta = valutaList[0]?.InnerXml;
+
+                XmlNodeList scanLokacijaList = doc.GetElementsByTagName("PD_Lokacija");
+                string scanLokacija = scanLokacijaList[0]?.InnerXml;
+
+                // update partner
+                if (!string.IsNullOrEmpty(OIB))
+                // Create a property value to update.
+                {
+                    if (this.Configuration.OIB_PD.ID == -1)
+                    {
+                        throw new Exception("Nedostaje šifra za OIB");
+                    }
+                    ObjVerEx PartnerVerEx = SearchPartnerByOIB(env.Vault, OIB);
+                    
+
+                    try
+                    {
+
+                        var partnerValue = new MFilesAPI.PropertyValue
+                        {
+                            PropertyDef = this.Configuration.Partner_PD.ID
+                        };
+                        partnerValue.Value.SetValue(
+                            MFDataType.MFDatatypeLookup,  // This must be correct for the property definition.
+                            PartnerVerEx.ID
+                        );
+
+                        // Update the property on the server.
+                        env.Vault.ObjectPropertyOperations.SetProperty(
+                            ObjVer: env.ObjVer,
+                            PropertyValue: partnerValue);
+                    }
+                    catch
+                    {
+
+                        if (!string.IsNullOrEmpty(errorProp))
+                        {
+                            var errorValue = new MFilesAPI.PropertyValue
+                            {
+                                PropertyDef = this.Configuration.error_PD.ID
+                            };
+                            errorValue.Value.SetValue(
+                                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                                errorProp + System.Environment.NewLine + $"Dobavljač pod OIB-om '{OIB}' nije pronađen"
+                            );
+                            // Update the property on the server.
+                            env.Vault.ObjectPropertyOperations.SetProperty(
+                                ObjVer: env.ObjVer,
+                                PropertyValue: errorValue);
+
+                            errorProp = errorProp.ToString() + System.Environment.NewLine + $"Dobavljač pod OIB-om '{OIB}' nije pronađen";
+                        }
+                        else
+                        {
+
+                            var errorValue = new MFilesAPI.PropertyValue
+                            {
+                                PropertyDef = this.Configuration.error_PD.ID
+                            };
+                            errorValue.Value.SetValue(
+                                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                                $"Partner pod OIB-om '{OIB}' nije pronađen"
+                            );                           
+                            // Update the property on the server.
+                            env.Vault.ObjectPropertyOperations.SetProperty(
+                                ObjVer: env.ObjVer,
+                                PropertyValue: errorValue);
+                            errorProp = $"Partner pod OIB-om '{OIB}' nije pronađen";
+                        }
+
+                    }
+                
+                }
+                // update klijent
+
+                if (!string.IsNullOrEmpty(OIBKlijent))
+                // Create a property value to update.
+                {
+                    if (this.Configuration.OIB_PD.ID == -1)
+                    {
+                        throw new Exception("Nedostaje šifra za OIB");
+                    }
+                    ObjVerEx KlijentVerEx = SearchKlijentByOIB(env.Vault, OIBKlijent);
+                    
+                    try
+                    {
+
+                        var KlijentValue = new MFilesAPI.PropertyValue
+                        {
+                            PropertyDef = this.Configuration.Klijent_PD.ID
+                        };
+                        KlijentValue.Value.SetValue(
+                            MFDataType.MFDatatypeLookup,  // This must be correct for the property definition.
+                            KlijentVerEx.ID
+                        );
+
+                        // Update the property on the server.
+                        env.Vault.ObjectPropertyOperations.SetProperty(
+                            ObjVer: env.ObjVer,
+                            PropertyValue: KlijentValue);
+                    }
+                    catch
+                    {
+                        if (!string.IsNullOrEmpty(errorProp))
+                        {
+                            var errorValue = new MFilesAPI.PropertyValue
+                            {
+                                PropertyDef = this.Configuration.error_PD.ID
+                            };
+                            errorValue.Value.SetValue(
+                                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                                errorProp + System.Environment.NewLine + $"Klijent pod OIB-om '{OIBKlijent}' nije pronađen"
+                            );                           
+                            // Update the property on the server.
+                            env.Vault.ObjectPropertyOperations.SetProperty(
+                                ObjVer: env.ObjVer,
+                                PropertyValue: errorValue);
+                            errorProp = errorProp.ToString() + System.Environment.NewLine + $"Klijent pod OIB-om '{OIBKlijent}' nije pronađen";
+                        }
+                        else
+                        {
+
+                            var errorValue = new MFilesAPI.PropertyValue
+                            {
+                                PropertyDef = this.Configuration.error_PD.ID
+                            };
+                            errorValue.Value.SetValue(
+                                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                                $"Klijent pod OIB-om '{OIBKlijent}' nije pronađen"
+                            );
+
+                            // Update the property on the server.
+                            env.Vault.ObjectPropertyOperations.SetProperty(
+                                ObjVer: env.ObjVer,
+                                PropertyValue: errorValue);
+
+                            errorProp = $"Klijent pod OIB-om '{OIBKlijent}' nije pronađen";
+                        }
+                    }
+                }
+                // update broj racuna
+
+                if (!string.IsNullOrEmpty(brojRacuna))
+                {
+                    var brojURAValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.brojURA_PD.ID
+                    };
+                    brojURAValue.Value.SetValue(
+                        MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                        brojRacuna
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: brojURAValue);
+                }
+
+            if (!string.IsNullOrEmpty(PozivNaBroj))
+            {
+                var PozivNaBrojURAValue = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = this.Configuration.PozivNaBroj.ID
+                };
+                PozivNaBrojURAValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    PozivNaBroj
+                );
+
+                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: env.ObjVer,
+                    PropertyValue: PozivNaBrojURAValue);
+            }
+
+            // update datum računa
+
+            if (!string.IsNullOrEmpty(datumRacuna))
+                {
+                    DateTime datumRacunaDatum = DateTime.Parse(datumRacuna);
+
+                    var datumRacunaValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.datumRacuna_PD.ID
+                    };
+                    datumRacunaValue.Value.SetValue(
+                        MFDataType.MFDatatypeDate,  // This must be correct for the property definition.
+                        datumRacunaDatum
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: datumRacunaValue);
+                }
+
+                // update valuta plaćanja
+
+                if (!string.IsNullOrEmpty(valutaPlacanja))
+                {
+                    DateTime valutaPlacanjaDatum = DateTime.Parse(valutaPlacanja);
+
+                    var valutaPlacanjaValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.valutaPlacanja_PD.ID
+                    };
+                    valutaPlacanjaValue.Value.SetValue(
+                        MFDataType.MFDatatypeDate,  // This must be correct for the property definition.
+                        valutaPlacanjaDatum
+                    );
+
+                   // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: env.ObjVer,
+                    PropertyValue: valutaPlacanjaValue);
+            }
+                // update neto
+
+                if (!string.IsNullOrEmpty(neto))
+                {
+                    decimal netoDecimal;
+                    if (decimal.TryParse(neto, out netoDecimal))
+                    {
+                        netoDecimal = decimal.Parse(neto);
+                    }
+                    else 
+                    {
+                        netoDecimal = 0;
+                        errorProp = errorProperty(env, "neto", errorProp);
+
+                    }
+                    var netoValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.neto_PD.ID
+                    };
+                    netoValue.Value.SetValue(
+                    MFDataType.MFDatatypeFloating,  // This must be correct for the property definition.
+                    netoDecimal
+                );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: netoValue);
+                }
+
+                // update pdv25%
+
+                if (!string.IsNullOrEmpty(pdv25))
+                {
+                    decimal pdv25Decimal;
+                    if (decimal.TryParse(pdv25, out pdv25Decimal))
+                    {
+                       pdv25Decimal = decimal.Parse(pdv25);
+                    }
+                    else
+                    { 
+                      pdv25Decimal = 0;
+                      errorProp = errorProperty(env, "pdv25", errorProp);
+                    }
+                    var pdv25Value = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.pdv25_PD.ID
+                    };
+                    pdv25Value.Value.SetValue(
+                    MFDataType.MFDatatypeFloating,  // This must be correct for the property definition.
+                    pdv25Decimal
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: pdv25Value);
+                }
+
+                // update pdv15%
+                if (!string.IsNullOrEmpty(pdv13))
+                {
+                    decimal pdv13Decimal;
+                    if (decimal.TryParse(pdv13, out pdv13Decimal))
+                    {
+                      pdv13Decimal = decimal.Parse(pdv13);
+                    }
+                    else
+                    {
+                        pdv13Decimal = 0;
+                        errorProp = errorProperty(env, "pdv13", errorProp);
+                    }
+                    var pdv13Value = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.pdv13_PD.ID
+                    };
+                    pdv13Value.Value.SetValue(
+                    MFDataType.MFDatatypeFloating,  // This must be correct for the property definition.
+                    pdv13Decimal
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: pdv13Value);
+                }
+
+                // update pdv5%
+                if (!string.IsNullOrEmpty(pdv5))
+                {
+                    decimal pdv5Decimal;
+                    if (decimal.TryParse(pdv5, out pdv5Decimal))
+                    {
+                       pdv5Decimal = decimal.Parse(pdv5);
+                    }
+                    else
+                    {
+                        pdv5Decimal = 0;
+                        errorProp = errorProperty(env, "pdv5", errorProp);
+                    }
+                var pdv5Value = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.pdv5_PD.ID
+                    };
+                    pdv5Value.Value.SetValue(
+                    MFDataType.MFDatatypeFloating,  // This must be correct for the property definition.
+                    pdv5Decimal
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: pdv5Value);
+                }
+
+                // update pdv total
+                if (!string.IsNullOrEmpty(pdvTotal))
+                {
+                    decimal pdvTotalDecimal;
+                    if (decimal.TryParse(pdvTotal, out pdvTotalDecimal))
+                    {
+                    pdvTotalDecimal = decimal.Parse(pdvTotal);
+                    }
+                    else
+                    {
+                        pdvTotalDecimal = 0;
+                        errorProp = errorProperty(env, "pdv total", errorProp);
+                    }
+
+                var pdvTotalValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.pdvTotal_PD.ID
+                    };
+                    pdvTotalValue.Value.SetValue(
+                    MFDataType.MFDatatypeFloating,  // This must be correct for the property definition.
+                    pdvTotalDecimal
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: pdvTotalValue);
+                }
+
+            // update bruto   if (Decimal.TryParse(value, style, culture, out number))
+            if (!string.IsNullOrEmpty(bruto))
+                {
+              
+                decimal brutoDecimal;
+                if (decimal.TryParse(bruto, out brutoDecimal))
+                {
+                    brutoDecimal = decimal.Parse(bruto);
+                }
+                else
+                {
+                    brutoDecimal = 0;
+                    errorProp = errorProperty(env, "bruto", errorProp);
+                }
+
+                var brutoValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.bruto_PD.ID
+                    };
+                    brutoValue.Value.SetValue(
+                    MFDataType.MFDatatypeFloating,  // This must be correct for the property definition.
+                    brutoDecimal
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: brutoValue);
+                }
+
+                // update valuta
+                if (!string.IsNullOrEmpty(valuta))
+                {
+                    ObjID valutaObjId = SearchObjIDInValueListPropertyValue(env.Vault, this.Configuration.valuta_VL.ID, valuta.ToUpper());
+                    // if (valutaObjId == null) throw new Exception("Valuta not found");
+                    try
+                    {
+                        var valutaValue = new MFilesAPI.PropertyValue
+                        {
+                            PropertyDef = this.Configuration.valuta_PD.ID
+                        };
+                        valutaValue.Value.SetValue(
+                        MFDataType.MFDatatypeLookup,  // This must be correct for the property definition.
+                        valutaObjId.ID
+                        );
+
+                        // Update the property on the server.
+                        env.Vault.ObjectPropertyOperations.SetProperty(
+                            ObjVer: env.ObjVer,
+                            PropertyValue: valutaValue);
+                    }
+                    catch
+                    {
+                        if (!string.IsNullOrEmpty(errorProp))
+                        {
+                            var errorValue = new MFilesAPI.PropertyValue
+                            {
+                                PropertyDef = this.Configuration.error_PD.ID
+                            };
+                            errorValue.Value.SetValue(
+                                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                                errorProp + System.Environment.NewLine + $" Valuta '{valuta}' nije pronađena"
+                            );                          
+                            // Update the property on the server.
+                            env.Vault.ObjectPropertyOperations.SetProperty(
+                                ObjVer: env.ObjVer,
+                                PropertyValue: errorValue);
+
+                            errorProp = errorProp.ToString()+ System.Environment.NewLine + $" Valuta '{valuta}' nije pronađena";
+                        }
+                        else
+                        {
+                            var errorValue = new MFilesAPI.PropertyValue
+                            {
+                                PropertyDef = this.Configuration.error_PD.ID
+                            };
+                            errorValue.Value.SetValue(
+                                MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                                $"Valuta '{valuta}' nije pronađena"
+                            );
+                            // Update the property on the server.
+                            env.Vault.ObjectPropertyOperations.SetProperty(
+                                ObjVer: env.ObjVer,
+                                PropertyValue: errorValue);
+                            errorProp = $"Valuta '{valuta}' nije pronađena";
+                        }
+                    }
+                }
+
+                // update lokacija skeniranja
+                if (!string.IsNullOrEmpty(scanLokacija))
+                {
+
+                    var lokacijaSkeniranjaValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.lokacijaSkeniranja_PD.ID
+                    };
+                    lokacijaSkeniranjaValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    scanLokacija
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: lokacijaSkeniranjaValue);
+                }
+                // change file
+                {
+                    env.Vault.ObjectOperations.SetSingleFileObject(
+                        ObjVer: env.ObjVer,
+                        SingleFile: false); // Setting to false alters it to a multi-file-document.
+                }
+                var modFiles = env.Vault.ObjectFileOperations.GetFilesForModificationInEventHandler(env.ObjVer);
+                env.Vault.ObjectFileOperations.RemoveFile(env.ObjVer, modFiles[1].FileVer);
+                // Add one file.
+                env.Vault.ObjectFileOperations.AddFile(
+                    ObjVer: env.ObjVer,
+                    Title: env.ObjVerEx.Title,
+                    Extension: "pdf",
+                   // SourcePath: @"C:\Users\I-Loncar-adm\Desktop\Projekti_IvanL\Soluma export\" + env.ObjVer.ID.ToString() + ".pdf");
+                   SourcePath: this.Configuration.PutanjaNaDisc + env.ObjVer.ID.ToString() + ".pdf");
+
+
+                {
+                    env.Vault.ObjectOperations.SetSingleFileObject(
+                        ObjVer: env.ObjVer,
+                        SingleFile: true);
+                }
+
+                File.Delete(this.Configuration.PutanjaNaDisc + env.ObjVer.ID.ToString() + ".pdf");
+                File.Delete(this.Configuration.PutanjaNaDisc + env.ObjVer.ID.ToString() + ".xml");
+                File.Delete(this.Configuration.PutanjaNaDisc + env.ObjVer.ID.ToString() + ".ura");
+            
+           
+        }
+
+        // not URA document...
+
+        [StateAction("WFS_GetSolumaFilesNotURA")]
+
+        public void GetSolumaFilesNotURA (StateEnvironment env)
+        {
+            // change file
+            {
+                env.Vault.ObjectOperations.SetSingleFileObject(
+                    ObjVer: env.ObjVer,
+                    SingleFile: false); // Setting to false alters it to a multi-file-document.
+            }
+            var modFiles = env.Vault.ObjectFileOperations.GetFilesForModificationInEventHandler(env.ObjVer);
+            env.Vault.ObjectFileOperations.RemoveFile(env.ObjVer, modFiles[1].FileVer);
+            // Add one file.
+            env.Vault.ObjectFileOperations.AddFile(
+                ObjVer: env.ObjVer,
+                Title: env.ObjVerEx.Title,
+                Extension: "pdf",
+             
+               SourcePath: this.Configuration.PutanjaNaDiscNeURA + env.ObjVer.ID.ToString() + ".pdf");
+
+
+            {
+                env.Vault.ObjectOperations.SetSingleFileObject(
+                    ObjVer: env.ObjVer,
+                    SingleFile: true);
+            }
+
+            File.Delete(this.Configuration.PutanjaNaDiscNeURA + env.ObjVer.ID.ToString() + ".pdf");
+            File.Delete(this.Configuration.PutanjaNaDiscNeURA + env.ObjVer.ID.ToString() + ".nura");   
+
+        }
+
+        // not URA document...
+
+        [StateAction("WFS_FindPartnerFromLuceed")]
+
+        public void FindPartnerFromLuceed(StateEnvironment env)
+        {
+            ObjVerEx klijent = new ObjVerEx();
+            // get Odobrenje URA object
+            List<ObjVerEx> vezaniObjekti = env.ObjVerEx.Relationships();
+            foreach (ObjVerEx vezaniObjekt in vezaniObjekti)
+            {
+                if (vezaniObjekt.Class == this.Configuration.Klijent_CL.ID)
+                {
+                    klijent = vezaniObjekt;
+                }
+            }
+            string port = klijent.GetProperty(this.Configuration.luceedPort_PD.ID).Value.DisplayValue;
+
+            string OIB = env.ObjVerEx.GetProperty(this.Configuration.OIB_PD.ID).Value.DisplayValue;
+            ObjVerEx PartnerVerEx = SearchPartnerByOIB(env.Vault, OIB);
+            if (PartnerVerEx == null)
+            {
+                OIB = OIB.Trim();
+                Root noviPartnerOIB = GetPartnerInfo(port,OIB);              
+                Root partnerInfo = (Root)noviPartnerOIB;
+
+                if (partnerInfo != null)
+                {
+                    Result result = partnerInfo.result[0];
+                    Partner partner = result.partner[0];
+
+
+                    string nazivPar = partner.naziv;
+                    string oibPar = partner.oib;
+                    string drzavaPar = partner.drzava;
+                    string adresaPar = partner.adresa;
+                    string postanskiBrojPar = partner.postanski_broj;
+                    string gradPar = partner.naziv_mjesta;
+
+                    if (!String.IsNullOrEmpty(oibPar))
+                    {
+                        AddNewPartner(env.Vault, nazivPar, oibPar, drzavaPar, adresaPar, postanskiBrojPar, gradPar);
+                    }
+                }
+            }
+        }
+
+        [StateAction("WFS_PostaviPartnera")]
+
+        public void SetPartnerFromPartnerOIB(StateEnvironment env)
+        ///
+        /// nakon postavljenog partner OIB-a imogućeg unosa iz Luceeda postavi iz property-a partner objekt
+        ///
+        {
+
+            string OIB = env.ObjVerEx.GetProperty(this.Configuration.OIB_PD.ID).Value.DisplayValue;
+
+            ObjVerEx PartnerVerEx = SearchPartnerByOIB(env.Vault, OIB);
+            if (PartnerVerEx != null)
+            {
+                try
+                {
+
+                    var partnerValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.Partner_PD.ID
+                    };
+                    partnerValue.Value.SetValue(
+                        MFDataType.MFDatatypeLookup,  // This must be correct for the property definition.
+                        PartnerVerEx.ID
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: partnerValue);
+
+
+                    env.ObjVerEx.Properties.RemoveProperty(this.Configuration.OIB_PD.ID);
+                }
+                catch (Exception ex)
+                {
+                    SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles -> SetPartnerFromPartnerOIB oib:" + OIB, ex);
+                }
+            }
+
+        }
+        public void DeleteHistory(int id, Vault vault)
+        {
+
+            var objID = new MFilesAPI.ObjID();
+            try
+            {
+                objID.SetIDs(
+                    ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                    ID: id);
+
+                ObjectVersions DocHistory = vault.ObjectOperations.GetHistory(objID);
+
+                List<ObjVerEx> DocHistoryList = DocHistory.ToObjVerExs(vault);
+
+                ObjVer objectLastVersion = vault.ObjectOperations.GetLatestObjVer(objID, true);
+
+                foreach (ObjVerEx version in DocHistoryList)
+                {
+                    if (version.Version != objectLastVersion.Version)
+                    {
+                        try
+                        {
+                            vault.ObjectOperations.DestroyObject(
+                                   version.ObjID,
+                                   DestroyAllVersions: false,
+                                   ObjectVersion: version.Version);
+                        }
+                        catch (Exception ex)
+                        {
+                            SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma// Deleting history...", ex);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma// Deleting history...", ex);
+            }
+
+        }
+
+
+        [StateAction("WFS_DohvatiDobavljacLuceedUID")]
+        public void DohvatiDobavljacLuceedUID(StateEnvironment env)
+        {
+            ObjVerEx klijent = new ObjVerEx();
+            ObjVerEx dobavljac = new ObjVerEx();
+            // get Odobrenje URA object
+            List<ObjVerEx> vezaniObjekti = env.ObjVerEx.Relationships();
+            foreach (ObjVerEx vezaniObjekt in vezaniObjekti)
+            {
+                if (vezaniObjekt.Class == this.Configuration.Klijent_CL.ID)
+                {
+                    klijent = vezaniObjekt;
+                }
+                else if (vezaniObjekt.Class == this.Configuration.Partner_CL.ID)
+                {
+                    dobavljac = vezaniObjekt;
+                }
+            }
+            try
+            {
+                string port = klijent.GetProperty(this.Configuration.luceedPort_PD.ID)?.Value.DisplayValue;
+                string dobavljacOIB = dobavljac.GetProperty(this.Configuration.OIB_PD.ID)?.Value.DisplayValue;
+                if (dobavljacOIB.Contains("HR")) throw new Exception("Dobavljačev OIB je nepravilnog formata, OIB bi trebao biti isključivo brojke. Molimo promjenite dobavljačev OIB u Luceed-u, te nakon sinkronizacije pokušajte ponovo");
+
+                Root noviPartnerOIB = GetPartnerInfo(port, dobavljacOIB);
+                if (noviPartnerOIB == null)
+                {
+                    throw new Exception("Dobavljač pod OIB-om: " + dobavljacOIB + " nije pronađen u Luceed-u. Molimo vas provjerite mrežu ili unesite dobavljača s navedenim OIB-om u Luceed!");
+                }
+                else
+                {
+                    Root partnerInfo = (Root)noviPartnerOIB;
+                    Result result = partnerInfo.result[0];
+                    Partner partner = result.partner[0];
+
+                    string dobavljacLuceedUID = partner.partner_uid;
+
+
+                    try
+                    {
+
+                        var dobavljacLuceedUIDValue = new MFilesAPI.PropertyValue
+                        {
+                            PropertyDef = this.Configuration.luceedDobavljacUid_PD.ID
+                        };
+                        dobavljacLuceedUIDValue.Value.SetValue(
+                            MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                            dobavljacLuceedUID
+                        );
+
+                        // Update the property on the server.
+                        env.Vault.ObjectPropertyOperations.SetProperty(
+                            ObjVer: env.ObjVer,
+                            PropertyValue: dobavljacLuceedUIDValue);
+                    }
+                    catch (Exception ex)
+                    {
+                        SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles ->  DohvatiDobavljacLuceedUID ObjVer: " + env.ObjVer.ID + " oib dobavljača: " + dobavljacOIB, ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles ->  DohvatiDobavljacLuceedUID ObjVer: " + env.ObjVer.ID, ex);
+            }
+        }
+
+        [StateAction("WFS_PosaljiURAuLuceed")]
+        /// Kreira JSON format ure te poziva proceduru za slanje (snimanje) URA u Luceed
+        public void CreateJSONandSendUraToLuceed(StateEnvironment env)
+        {
+            string odabranaKnjiga;
+            string primljen = env.ObjVerEx.GetProperty(this.Configuration.datumZaprimanja_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(primljen))
+            {
+                DateTimeFormatInfo usDtfi = new CultureInfo("en-US", false).DateTimeFormat;
+                string noviDatum = Convert.ToDateTime(primljen, usDtfi).ToString("dd.MM.yyyy");
+                primljen = "\"primljen\":\"" + noviDatum + "\",";
+            }
+            string knjigaURA = env.ObjVerEx.GetProperty(this.Configuration.knjigaURA_PD.ID)?.Value.DisplayValue;
+           
+            switch (knjigaURA)
+            {
+                case "Uvezena dobra i usluge":
+                    knjigaURA = "2";
+                    break;
+
+                case "Dobra i usluge u tuzemstvu":
+                    knjigaURA = "1";
+                    break;
+
+                case "Dani predujmovi":
+                    knjigaURA = "3";
+                    break;
+            }
+            // odabrana knjiga se koristi za raspoznavanje propertyja za porezne razrede!
+            odabranaKnjiga = knjigaURA;
+            knjigaURA = "\"inda\":\"" + knjigaURA + "\",";
+
+
+            string datumKnjizenja = env.ObjVerEx.GetProperty(this.Configuration.datumKnjizenja_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(datumKnjizenja))
+            {
+                DateTimeFormatInfo usDtfi = new CultureInfo("en-US", false).DateTimeFormat;
+                string noviDatum = Convert.ToDateTime(datumKnjizenja, usDtfi).ToString("dd.MM.yyyy");
+                datumKnjizenja = "\"datum\":\"" + noviDatum + "\",";
+            }
+            string dobavljacUID = env.ObjVerEx.GetProperty(this.Configuration.luceedDobavljacUid_PD)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(dobavljacUID))
+                dobavljacUID = "\"dobavljac__partner_uid\":\"" + dobavljacUID + "\",";
+
+            string brojURA = env.ObjVerEx.GetProperty(this.Configuration.brojURA_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(brojURA))
+                brojURA = "\"racun\":\"" + brojURA + "\",";
+
+            string datumRacuna = env.ObjVerEx.GetProperty(this.Configuration.datumRacuna_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(datumRacuna))
+            {
+                DateTimeFormatInfo usDtfi = new CultureInfo("en-US", false).DateTimeFormat;
+                string noviDatum = Convert.ToDateTime(datumRacuna, usDtfi).ToString("dd.MM.yyyy");
+                datumRacuna = "\"datum_racuna\":\"" + noviDatum + "\",";
+            }
+            string dospijece = env.ObjVerEx.GetProperty(this.Configuration.dospijece_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(dospijece))
+            {
+                DateTimeFormatInfo usDtfi = new CultureInfo("en-US", false).DateTimeFormat;
+                string noviDatum = Convert.ToDateTime(dospijece, usDtfi).ToString("dd.MM.yyyy");
+                dospijece = "\"dospijece\":\"" + noviDatum + "\",";
+            }
+            string tipRacuna = env.ObjVerEx.GetProperty(this.Configuration.tipRacuna_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(tipRacuna))
+                tipRacuna = "\"tip_racuna\":\"" + tipRacuna + "\",";
+
+            //TODO Add Potiv na broj
+
+            ///////////////
+            string pozivNaBroj = env.ObjVerEx.GetProperty(this.Configuration.PozivNaBroj.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(pozivNaBroj))
+                pozivNaBroj = "\"poziv_na_broj\":\"" + pozivNaBroj + "\",";
+            //////////////////
+            string valuta = env.ObjVerEx.GetProperty(this.Configuration.valuta_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(valuta))
+            {
+                if (valuta == "HRK")
+                {
+                    valuta = "KN";
+                }
+                valuta = "\"valuta\":\"" + valuta + "\",";
+            }
+
+            string brutto = env.ObjVerEx.GetProperty(this.Configuration.bruto_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(brutto))
+                brutto = "\"iznos_racuna\":" + brutto + ",";
+
+            string prijenosPO = env.ObjVerEx.GetProperty(this.Configuration.prijenosPorezneObveze_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(prijenosPO))
+            {
+                if (prijenosPO.ToLower() == "no") { prijenosPO = "N"; }
+                else if (prijenosPO.ToLower() == "yes") { prijenosPO = "D"; };
+
+                prijenosPO = "\"tuzemni_prijenos_po\":\"" + prijenosPO + "\",";
+            }
+
+            /////////////////
+
+
+            string osnovicaVP = env.ObjVerEx.GetProperty(this.Configuration.OsnovicaVP.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(osnovicaVP))
+                osnovicaVP = "\"osnovica_vp\":" + osnovicaVP + ",";
+
+
+            string neoporezivo = env.ObjVerEx.GetProperty(this.Configuration.Neoporezivo.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(neoporezivo))
+                neoporezivo = "\"iznos_bez_poreza\":" + neoporezivo + ",";
+            //////////////////
+
+            string osnovicaPDV25 = env.ObjVerEx.GetProperty(this.Configuration.osnovicaZaPdv25_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(osnovicaPDV25))
+                osnovicaPDV25 = "\"osnovica1\":" + osnovicaPDV25 + ",";
+
+            string osnovicaPDV13 = env.ObjVerEx.GetProperty(this.Configuration.osnovicaZaPdv13_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(osnovicaPDV13))
+                osnovicaPDV13 = "\"osnovica2\":" + osnovicaPDV13 + ",";
+
+            string osnovicaPDV5 = env.ObjVerEx.GetProperty(this.Configuration.osnovicaZaPdv5_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(osnovicaPDV5))
+                osnovicaPDV5 = "\"osnovica3\":" + osnovicaPDV5 + ",";
+
+            string PdvOdbijaSe25 = env.ObjVerEx.GetProperty(this.Configuration.PDVodbijase25_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(PdvOdbijaSe25))
+                PdvOdbijaSe25 = "\"pp1_odbitak\":" + PdvOdbijaSe25 + ",";
+
+            string PdvOdbijaSe13 = env.ObjVerEx.GetProperty(this.Configuration.PDVodbijase13_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(PdvOdbijaSe13))
+                PdvOdbijaSe13 = "\"pp2_odbitak\":" + PdvOdbijaSe13 + ",";
+
+            string PdvOdbijaSe5 = env.ObjVerEx.GetProperty(this.Configuration.PDVodbijase5_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(PdvOdbijaSe5))
+                PdvOdbijaSe5 = "\"pp3_odbitak\":" + PdvOdbijaSe5 + ",";
+
+            string PdvNeOdbijaSe25 = env.ObjVerEx.GetProperty(this.Configuration.PDVneodbijase25_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(PdvNeOdbijaSe25))
+                PdvNeOdbijaSe25 = "\"pp1_bez_odbitka\":" + PdvNeOdbijaSe25 + ",";
+
+            string PdvNeOdbijaSe13 = env.ObjVerEx.GetProperty(this.Configuration.PDVneodbijase13_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(PdvNeOdbijaSe13))
+                PdvNeOdbijaSe13 = "\"pp2_bez_odbitka\":" + PdvNeOdbijaSe13 + ",";
+
+            string PdvNeOdbijaSe5 = env.ObjVerEx.GetProperty(this.Configuration.PDVneodbijase5_PD.ID)?.Value.DisplayValue;
+            if (!String.IsNullOrEmpty(PdvNeOdbijaSe5))
+                PdvNeOdbijaSe5 = "\"pp3_bez_odbitka\":" + PdvNeOdbijaSe5 + ",";
+
+            string osnovicaPDV252 ="";
+            string osnovicaPDV132 = "";
+            string osnovicaPDV52 = "";
+            string PdvOdbijaSe252 = "";
+            string PdvOdbijaSe132 = "";
+            string PdvOdbijaSe52 = "";
+            if (odabranaKnjiga == "2")
+            {
+                osnovicaPDV252 = env.ObjVerEx.GetProperty(this.Configuration.osnovicaZaPdv252_PD.ID)?.Value.DisplayValue;
+                if (!String.IsNullOrEmpty(osnovicaPDV252))
+                    osnovicaPDV252 = "\"osnovica1_usluge\":" + osnovicaPDV252 + ",";
+
+                osnovicaPDV132 = env.ObjVerEx.GetProperty(this.Configuration.osnovicaZaPdv132_PD.ID)?.Value.DisplayValue;
+                if (!String.IsNullOrEmpty(osnovicaPDV132))
+                    osnovicaPDV132 = "\"osnovica2_usluge\":" + osnovicaPDV132 + ",";
+
+                osnovicaPDV52 = env.ObjVerEx.GetProperty(this.Configuration.osnovicaZaPdv52_PD.ID)?.Value.DisplayValue;
+                if (!String.IsNullOrEmpty(osnovicaPDV52))
+                    osnovicaPDV52 = "\"osnovica3_usluge\":" + osnovicaPDV52 + ",";
+
+                PdvOdbijaSe252 = env.ObjVerEx.GetProperty(this.Configuration.PDVodbijase252_PD.ID)?.Value.DisplayValue;
+                if (!String.IsNullOrEmpty(PdvOdbijaSe252))
+                    PdvOdbijaSe252 = "\"pp1_usluge_odbitak\":" + PdvOdbijaSe252 + ",";
+
+                PdvOdbijaSe132 = env.ObjVerEx.GetProperty(this.Configuration.PDVodbijase132_PD.ID)?.Value.DisplayValue;
+                if (!String.IsNullOrEmpty(PdvOdbijaSe132))
+                    PdvOdbijaSe132 = "\"pp2_usluge_odbitak\":" + PdvOdbijaSe132 + ",";
+
+                PdvOdbijaSe52 = env.ObjVerEx.GetProperty(this.Configuration.PDVodbijase52_PD.ID)?.Value.DisplayValue;
+                if (!String.IsNullOrEmpty(PdvOdbijaSe52))
+                    PdvOdbijaSe52 = "\"pp3_usluge_odbitak\":" + PdvOdbijaSe52 + ",";
+            }
+            brojURA = brojURA.Replace("/", "-");
+            brojURA = brojURA.Replace("\\", "-");
+
+            //    "\"item\":\"value\"";
+            string UraJson = "{ \"ura\": [{ " + primljen + knjigaURA + datumKnjizenja + dobavljacUID + brojURA + datumRacuna
+                   + dospijece + tipRacuna + pozivNaBroj + valuta + brutto + prijenosPO + osnovicaVP + neoporezivo + osnovicaPDV25 + osnovicaPDV13 + osnovicaPDV5  
+                   + PdvOdbijaSe25 + PdvNeOdbijaSe25 + PdvOdbijaSe13 + PdvNeOdbijaSe13 + PdvOdbijaSe5 + PdvNeOdbijaSe5 + osnovicaPDV252
+                   + osnovicaPDV132 + osnovicaPDV52 + PdvOdbijaSe252 + PdvOdbijaSe132 + PdvOdbijaSe52;
+
+            string json = JsonConvert.SerializeObject(UraJson);
+
+            //write string to file
+            System.IO.File.WriteAllText(@"D:\UraJson.txt", json);
+
+            // za zadnji prop maknuti zarez!
+            UraJson = UraJson.Remove(UraJson.Length - 1, 1);
+            UraJson = UraJson + "} ]}";
+           
+
+
+            // SET PORT
+            ObjVerEx klijent = new ObjVerEx();
+            // get Odobrenje URA object
+            List<ObjVerEx> vezaniObjekti = env.ObjVerEx.Relationships();
+            foreach (ObjVerEx vezaniObjekt in vezaniObjekti)
+            {
+                if (vezaniObjekt.Class == this.Configuration.Klijent_CL.ID)
+                {
+                    klijent = vezaniObjekt;
+                }
+            }
+
+            try
+            {
+                string port = klijent.GetProperty(this.Configuration.luceedPort_PD.ID).Value.DisplayValue;
+                string response = SendUraToLuceed(port, UraJson);
+
+                //// Write JSON and PORT as response to a property
+                string json_PD = "Pokušaj slanja na port : " + port + " Json: " + json;
+                env.ObjVerEx.SetProperty(this.Configuration.JSON_PD.ID, MFDataType.MFDatatypeMultiLineText, json_PD);
+                env.ObjVerEx.SaveProperties();
+
+
+                SysUtils.ReportInfoToEventLog(logEnvirovment + " Ura response", response);
+
+                string status = "";
+                try
+                {
+                    status = response.Substring(0, response.IndexOf(":"));
+                    status = status.Trim(' ', '{', '[', '"');
+                }
+                catch (Exception ex)
+                {
+                    SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma ->pošalji ura u luceed", ex);
+                }
+
+                string odgovor = "";
+                try
+                {
+                    odgovor = response.Substring(response.IndexOf(":"));
+                    odgovor = odgovor.Trim(' ', '}', ']', '"', ':', '[');
+                }
+                catch (Exception ex)
+                {
+                    SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma ->pošalji ura u luceed", ex);
+                }
+
+                if (status == "result")
+                {
+                    var uraLuceedUIDValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.uraLuceedUID_PD.ID
+                    };
+                    uraLuceedUIDValue.Value.SetValue(
+                        MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                        odgovor
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: uraLuceedUIDValue);
+
+                    // dodaj ostatak responsa kao prop pa šalji sam dokument u luceed
+                    //sendDocToLu
+                }
+                else if (status == "error")
+                {
+                    // prop error-> baci u error state za to
+                    var errorValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.error_PD.ID
+                    };
+                    errorValue.Value.SetValue(
+                        MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                        odgovor
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: errorValue);
+
+                    //pomakni u wfs za errore
+                    var workflowStateProperty = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                    };
+                    workflowStateProperty.Value.SetValue(
+                        MFDataType.MFDatatypeLookup,
+                        env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias(this.Configuration.ura_greskaUObradi_WFS.Alias)); // The ID of a workflow state that is valid to move to from the current one.
+                                                                                                                                 // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: workflowStateProperty);
+                }
+                else
+                {
+                    // nepoznat status i kontaktirajte administratora
+                    var errorValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.error_PD.ID
+                    };
+                    errorValue.Value.SetValue(
+                        MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                        "Status nepoznat, molimo kontaktirajte administratora!\n" + response
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: errorValue);
+
+                    //pomakni u wfs za errore
+                    var workflowStateProperty = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                    };
+                    workflowStateProperty.Value.SetValue(
+                        MFDataType.MFDatatypeLookup,
+                        env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias(this.Configuration.ura_greskaUObradi_WFS.Alias)); // The ID of a workflow state that is valid to move to from the current one.
+                                                                                                                                 // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: workflowStateProperty);
+                }
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles ->  Pošalji URA (metadata) u Luceed: " + env.ObjVer.ID, ex);
+            }
+        }
+
+
+        [StateAction("WFS_SendPDFToLuceed")]
+
+        public void SendPDFToLuceed(StateEnvironment env)
+        {
+            ObjVerEx klijent = new ObjVerEx();
+            // get klijent object
+            List<ObjVerEx> vezaniObjekti = env.ObjVerEx.Relationships();
+            foreach (ObjVerEx vezaniObjekt in vezaniObjekti)
+            {
+                if (vezaniObjekt.Class == this.Configuration.Klijent_CL.ID)
+                {
+                    klijent = vezaniObjekt;
+                }
+            }
+            string port = klijent.GetProperty(this.Configuration.luceedPort_PD.ID).Value.DisplayValue;
+
+            ObjectFiles modFiles = env.Vault.ObjectFileOperations.GetFilesForModificationInEventHandler(env.ObjVer);
+
+            Byte[] bytes;
+            string fileString = "";
+            string naziv= env.ObjVerEx.Title.ToString();
+            string fileName = "";
+            string luceed_doc_uid = env.ObjVerEx.GetProperty(this.Configuration.uraLuceedUID_PD.ID)?.Value.DisplayValue;
+
+            // Sanity :D
+            string path = @"C:\temp\";
+            bool exists = System.IO.Directory.Exists(path);
+            if (!exists) System.IO.Directory.CreateDirectory(path);
+
+            foreach (ObjectFile item in modFiles)
+            {
+
+                fileName = item.Title.ToString() + "." + item.Extension.ToString();
+                // Temp file path.
+                string tempFilePath = path + item.GetNameForFileSystem();
+
+                // Download the file from the original object to the temp directory.
+                env.Vault.ObjectFileOperations.DownloadFile(item.ID,
+                    env.Vault.ObjectFileOperations.GetLatestFileVersion(item.ID, false).Version,
+                    tempFilePath);
+
+
+                bytes = File.ReadAllBytes(tempFilePath);
+                fileString = Convert.ToBase64String(bytes);
+                // Delete the downloaded file from the temp folder.
+                //System.IO.File.Delete(tempFilePath);
+
+            }
+            naziv = naziv.Replace("/", "-");
+            naziv = naziv.Replace("\"", "");
+            naziv = naziv.Replace("\\", "-");
+            fileName  = fileName.Replace("/", "-");
+            fileName = fileName.Replace("\"", "");
+            fileName = fileName.Replace("\\", "-");
+
+            string urlBegin = UrlHelper.GetBaseUrlForWebAccess(env.Vault);
+            string urlEnd = String.Format("/openfile.aspx?vault={0}&objtype=0&docid={1}&showopendialog=0", env.Vault.GetGUID(), env.ObjVerEx.ID);
+            string mfUrl = urlBegin + urlEnd;
+
+            string jsonb = "{ \"documents\":[ { \"tip_veze\":\"URA\", \"naziv\":\""+ naziv +"\", \"Filename\":\""+ fileName + "\", \"file_b2b\":\"" + env.ObjVerEx.ID.ToString() + "- MFiles" + "\",\"luceed_doc_uid\":\"" + luceed_doc_uid + "\",\"content\":\"" + fileString + "\",\"opis\":\"" + mfUrl + "\"} ] }";
+
+            string json = JsonConvert.SerializeObject(jsonb);
+
+            ////////// OVDJE NAPISATI KOD ZA ZAPIS JSONA U PROPERTY!!!
+
+            //string json_PD = env.ObjVerEx.GetProperty(this.Configuration.JSON_PD.ID).TypedValue.DisplayValue;
+            //env.ObjVerEx.SetProperty(this.Configuration.JSON_PD.ID, MFDataType.MFDatatypeMultiLineText, json);
+            //env.ObjVerEx.SaveProperties();
+
+            //write string to file
+            System.IO.File.WriteAllText(@"D:\jsonb.txt", json);
+
+            SysUtils.ReportInfoToEventLog(logEnvirovment + " slanje PDF-a", " Pokušaj slanja na port :" + port + " s Json-om : " + jsonb);
+            // tip veze "URA"
+            try
+            {
+                string url = " :" + port + "/datasnap/rest/DocumentManager/snimi/";
+                var client = new RestClient(url);
+                client.Authenticator = new HttpBasicAuthenticator( );
+
+                var request = new RestRequest(Method.POST);
+                request.RequestFormat = DataFormat.Json;
+                request.AddHeader("cache-control", "no-cache");
+                //  request.AddHeader("Authorization", " ");
+
+                request.AddParameter("application/json", jsonb, ParameterType.RequestBody);
+                var response = client.Execute(request);
+
+                SysUtils.ReportInfoToEventLog(logEnvirovment + " Ura PDF response", response.StatusCode.ToString());
+
+                if (response.StatusCode.ToString() != "OK")
+                {
+                    // nepoznat status i kontaktirajte administratora
+                    var errorValue = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = this.Configuration.error_PD.ID
+                    };
+                    errorValue.Value.SetValue(
+                        MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                        response.Content.ToString()
+                    );
+
+                    // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: errorValue);
+
+                    //pomakni u wfs za errore
+                    var workflowStateProperty = new MFilesAPI.PropertyValue
+                    {
+                        PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                    };
+                    workflowStateProperty.Value.SetValue(
+                        MFDataType.MFDatatypeLookup,
+                        env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias(this.Configuration.ura_greskaUObradiDoc_WFS.Alias)); // The ID of a workflow state that is valid to move to from the current one.
+                                                                                                                                 // Update the property on the server.
+                    env.Vault.ObjectPropertyOperations.SetProperty(
+                        ObjVer: env.ObjVer,
+                        PropertyValue: workflowStateProperty);
+
+                }
+            }
+            catch(Exception ex)
+            { 
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma// Snimi dokument", ex);
+                // nepoznat status i kontaktirajte administratora
+                var errorValue = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = this.Configuration.error_PD.ID
+                };
+                errorValue.Value.SetValue(
+                    MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                    "Greška u mreži, provjerite svoju internet konekciju ili kontaktirajte administratora!"
+                );
+
+                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: env.ObjVer,
+                    PropertyValue: errorValue);
+
+                //pomakni u wfs za errore
+                var workflowStateProperty = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefState
+                };
+                workflowStateProperty.Value.SetValue(
+                    MFDataType.MFDatatypeLookup,
+                    env.Vault.WorkflowOperations.GetWorkflowStateIDByAlias(this.Configuration.ura_greskaUObradiDoc_WFS.Alias)); // The ID of a workflow state that is valid to move to from the current one.
+                                                                                                                                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: env.ObjVer,
+                    PropertyValue: workflowStateProperty);
+            }
+        }
+
+
+   
+            public void DeleteFirstVersion(int id, Vault vault)
+        {
+
+            var objID = new MFilesAPI.ObjID();
+            try
+            {
+                objID.SetIDs(
+                    ObjType: (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument,
+                    ID: id);
+
+                ObjectVersions DocHistory = vault.ObjectOperations.GetHistory(objID);
+
+                List<ObjVerEx> DocHistoryList = DocHistory.ToObjVerExs(vault);
+
+
+                int firstver = 999999999;
+
+                foreach (ObjVerEx version in DocHistoryList)
+                {
+                    if (version.Version < firstver)
+                    {
+                        firstver = version.Version;                       
+                    }
+                }
+
+                try
+                {
+                    vault.ObjectOperations.DestroyObject(
+                           objID,
+                           DestroyAllVersions: false,
+                           ObjectVersion: firstver);
+                }
+                catch (Exception ex)
+                {
+                    SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma// Deleting history...", ex);
+                }
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " Recurring Get Files From Soluma// Deleting history...", ex);
+            }
+
+        }
+        private ObjVerEx SearchPartnerByOIB(Vault vault, string OIB)
+        {
+            var searchBuilder = new MFSearchBuilder(vault);
+            searchBuilder.Deleted(false);
+            searchBuilder.ObjType(this.Configuration.Partner_OT.ID);
+            searchBuilder.Class(this.Configuration.Partner_CL.ID);
+            searchBuilder.Property(this.Configuration.OIB_PD.ID, 
+                                   MFDataType.MFDatatypeText,
+                                   OIB
+                                  );
+
+            return searchBuilder.FindOneEx();
+        }
+        private ObjVerEx SearchKlijentByOIB(Vault vault, string OIBKlijent)
+        {
+            var searchBuilder = new MFSearchBuilder(vault);
+            searchBuilder.Deleted(false);
+            searchBuilder.ObjType(this.Configuration.Klijent_OT.ID);
+            searchBuilder.Class(this.Configuration.Klijent_CL.ID);
+            searchBuilder.Property(this.Configuration.OIB_PD.ID, 
+                                   MFDataType.MFDatatypeText,
+                                   OIBKlijent
+                                  );
+
+            return searchBuilder.FindOneEx();
+        }
+
+        public ObjID SearchObjIDInValueListPropertyValue(Vault vault, int valueListId, string propDefValue)
+        {
+            var searchConditions = new SearchConditions();
+            // Create the condition.
+            var condition = new SearchCondition();
+            condition.Expression.SetValueListItemExpression(MFValueListItemPropertyDef.MFValueListItemPropertyDefName, MFParentChildBehavior.MFParentChildBehaviorNone);
+
+            condition.ConditionType = MFConditionType.MFConditionTypeEqual;
+            condition.TypedValue.SetValue(MFDataType.MFDatatypeText, propDefValue);
+            searchConditions.Add(-1, condition);
+
+            //add new condition...
+            var deletedSearchCondition = new SearchCondition();
+
+            deletedSearchCondition.Expression.SetValueListItemExpression(MFValueListItemPropertyDef.MFValueListItemPropertyDefDeleted, MFParentChildBehavior.MFParentChildBehaviorNone);
+            deletedSearchCondition.ConditionType = MFConditionType.MFConditionTypeEqual;
+            deletedSearchCondition.TypedValue.SetValue(MFDataType.MFDatatypeBoolean, Value: false);
+            searchConditions.Add(Index: -1, deletedSearchCondition);
+
+            ValueListItemSearchResults searchResults = vault.ValueListItemOperations.SearchForValueListItemsEx(
+                ValueList: valueListId,
+                SearchConditions: searchConditions,
+                UpdateFromServer: false,
+                RefreshTypeIfExternalValueList: MFExternalDBRefreshType.MFExternalDBRefreshTypeNone,
+                ReplaceCurrentUserWithCallersIdentity: true);
+
+            ObjID firstResult = null;
+            foreach (ValueListItem searchResult in searchResults)
+            {
+                firstResult = searchResult.ObjID;
+                break;
+            }
+            return firstResult;
+        }
+
+        public void AddNewPartner(Vault vault, string naziv, string oib, string drzava, string adresa, string postanskiBroj, string grad)
+        {
+            try
+            {
+                // Define the property values for the new object.
+                var propertyValues = new MFilesAPI.PropertyValues();
+
+                // Class.
+                var classPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefClass
+                };
+                classPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeLookup,  // This must be correct for the property definition.
+                    vault.ClassOperations.GetObjectClassIDByAlias("CL_Partner")// This must be the ID of a class within the object type specified below.
+                    );
+                propertyValues.Add(-1, classPropertyValue);
+
+                // Name or title.
+                var nameOrTitlePropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = (int)MFBuiltInPropertyDef.MFBuiltInPropertyDefNameOrTitle
+                };
+                nameOrTitlePropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    naziv
+                );
+                propertyValues.Add(-1, nameOrTitlePropertyValue);
+
+                // The employee class requires us to define whether they are a supervisor.
+                var nazivPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = this.Configuration.naziv_PD.ID
+                };
+                nazivPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    naziv
+                );
+                propertyValues.Add(-1, nazivPropertyValue);
+
+                var oibPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = this.Configuration.OIB_PD.ID
+                };
+                oibPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    oib
+                );
+                propertyValues.Add(-1, oibPropertyValue);
+
+                var drzavaPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = this.Configuration.drzava_PD.ID
+                };
+                drzavaPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    drzava
+                );
+                propertyValues.Add(-1, drzavaPropertyValue);
+
+                var adresaPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = this.Configuration.adresa_PD.ID
+                };
+                adresaPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    adresa
+                );
+                propertyValues.Add(-1, adresaPropertyValue);
+
+                var postanskiBrojPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = this.Configuration.postanskiBroj_PD.ID
+                };
+                postanskiBrojPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    postanskiBroj
+                );
+                propertyValues.Add(-1, postanskiBrojPropertyValue);
+
+                var gradPropertyValue = new MFilesAPI.PropertyValue()
+                {
+                    PropertyDef = this.Configuration.grad_PD.ID
+                };
+                gradPropertyValue.Value.SetValue(
+                    MFDataType.MFDatatypeText,  // This must be correct for the property definition.
+                    grad
+                );
+                propertyValues.Add(-1, gradPropertyValue);
+
+                // Define the source files to add (none, in this case).
+                var sourceFiles = new MFilesAPI.SourceObjectFiles();
+
+                // What object type is being created (Employee)?
+                var objectTypeID = vault.ObjectTypeOperations.GetObjectTypeIDByAlias(this.Configuration.Partner_OT.Alias);
+
+                // A "single file document" must be both a document and contain exactly one file.
+                var isSingleFileDocument =
+                    objectTypeID == (int)MFBuiltInObjectType.MFBuiltInObjectTypeDocument && sourceFiles.Count == 1;
+
+                // Create the object and check it in.
+                var objectVersion = vault.ObjectOperations.CreateNewObjectEx(
+                    objectTypeID,
+                    propertyValues,
+                    sourceFiles,
+                    SFD: isSingleFileDocument,
+                    CheckIn: true);
+            }
+            catch (Exception ex)
+            {
+                SysUtils.ReportErrorToEventLog(logEnvirovment + " GetSolumaFiles ->AddNewPartner  Oib" + oib, ex);
+            }
+        }
+       
+        public string errorProperty (StateEnvironment env, string property, string errorProp)
+        {
+            if (!string.IsNullOrEmpty(errorProp))
+            {
+                var errorValue = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = this.Configuration.error_PD.ID
+                };
+                errorValue.Value.SetValue(
+                    MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                    errorProp + System.Environment.NewLine + $"Neuspješno iščitavanje polja " + property + " s dokumenta"
+                );
+                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: env.ObjVer,
+                    PropertyValue: errorValue);
+             return   errorProp = errorProp.ToString() + System.Environment.NewLine + $"Neuspješno iščitavanje polja " + property + " s dokumenta";
+            }
+            else
+            {
+
+                var errorValue = new MFilesAPI.PropertyValue
+                {
+                    PropertyDef = this.Configuration.error_PD.ID
+                };
+                errorValue.Value.SetValue(
+                    MFDataType.MFDatatypeMultiLineText,  // This must be correct for the property definition.
+                    $"Neuspješno iščitavanje polja " + property + " s dokumenta"
+                );
+
+                // Update the property on the server.
+                env.Vault.ObjectPropertyOperations.SetProperty(
+                    ObjVer: env.ObjVer,
+                    PropertyValue: errorValue);
+
+              return  errorProp = $"Neuspješno iščitavanje polja " + property + " s dokumenta";
+            }
+        }
+
+    
+    }
+}
+ 
